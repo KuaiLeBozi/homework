@@ -3,9 +3,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <omp.h>
 
 #include "utils.h"
 
+#define NUM_THREADS 32
 void image_transform(float *__restrict__ packed_image,
                      float *__restrict__ V,
                      const V_shape_t vs,
@@ -18,7 +20,9 @@ void image_transform(float *__restrict__ packed_image,
 
   float z0, z1, z2, z3, z4, z5, z6;
 
+  #pragma omp parallel for private(z0, z1, z2, z3, z4, z5, z6) schedule(static) num_threads(NUM_THREADS)
   for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
+    #pragma omp simd aligned(packed_image_tensor, V_tensor: 64)
     for (int64_t w = 0; w < ti.tile_in_w; ++w) {
       z6 = packed_image_tensor[0][w][idx];
 
@@ -67,7 +71,7 @@ void image_transform(float *__restrict__ packed_image,
       V_tensor[4][w][idx] = z4;
       V_tensor[5][w][idx] = z5;
     }
-
+    #pragma omp simd aligned(packed_image_tensor, V_tensor: 64)
     for (int64_t h = 0; h < ti.tile_in_h; ++h) {
       z6 = V_tensor[h][0][idx];
 
@@ -120,82 +124,83 @@ void image_transform(float *__restrict__ packed_image,
 }
 
 void filter_transform(float *__restrict__ packed_filter,
-                      float *__restrict__ U,
-                      const filter_shape_t fs,
-                      const U_shape_t us,
-                      const int64_t collapsed_dim_size) {
-  typedef float(*packed_filter_tensor_t)[fs.w][collapsed_dim_size];
-  typedef float(*U_tensor_t)[us.w][collapsed_dim_size];
-  packed_filter_tensor_t packed_filter_tensor = (packed_filter_tensor_t)packed_filter;
-  U_tensor_t U_tensor = (U_tensor_t)U;
+  float *__restrict__ U,
+  const filter_shape_t fs,
+  const U_shape_t us,
+  const int64_t collapsed_dim_size) {
+typedef float(*packed_filter_tensor_t)[fs.w][collapsed_dim_size];
+typedef float(*U_tensor_t)[us.w][collapsed_dim_size];
+packed_filter_tensor_t packed_filter_tensor = (packed_filter_tensor_t)packed_filter;
+U_tensor_t U_tensor = (U_tensor_t)U;
 
-  float z0, z1, z2, z3, z4, z5, z6;
+float z0, z1, z2, z3, z4, z5, z6;
+#pragma omp parallel for private(z0, z1, z2, z3, z4, z5, z6) schedule(static) num_threads(NUM_THREADS)
+for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
+  #pragma omp simd aligned(packed_filter_tensor, U_tensor: 64)
+for (int64_t w = 0; w < fs.w; ++w) {
+z6 = packed_filter_tensor[0][w][idx];
 
-  for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
-    for (int64_t w = 0; w < fs.w; ++w) {
-      z6 = packed_filter_tensor[0][w][idx];
+z0 = (1.0f / 4.0f) * z6;
+z1 = (-1.0f / 6.0f) * z6;
+z2 = (-1.0f / 6.0f) * z6;
+z3 = (1.0f / 24.0f) * z6;
+z4 = (1.0f / 24.0f) * z6;
 
-      z0 = (1.0f / 4.0f) * z6;
-      z1 = (-1.0f / 6.0f) * z6;
-      z2 = (-1.0f / 6.0f) * z6;
-      z3 = (1.0f / 24.0f) * z6;
-      z4 = (1.0f / 24.0f) * z6;
+z6 = packed_filter_tensor[1][w][idx];
 
-      z6 = packed_filter_tensor[1][w][idx];
+z1 += (-1.0f / 6.0f) * z6;
+z2 += (1.0f / 6.0f) * z6;
+z3 += (1.0f / 12.0f) * z6;
+z4 += (-1.0f / 12.0f) * z6;
 
-      z1 += (-1.0f / 6.0f) * z6;
-      z2 += (1.0f / 6.0f) * z6;
-      z3 += (1.0f / 12.0f) * z6;
-      z4 += (-1.0f / 12.0f) * z6;
+z6 = packed_filter_tensor[2][w][idx];
 
-      z6 = packed_filter_tensor[2][w][idx];
+z1 += (-1.0f / 6.0f) * z6;
+z2 += (-1.0f / 6.0f) * z6;
+z3 += (1.0f / 6.0f) * z6;
+z4 += (1.0f / 6.0f) * z6;
+z5 = z6;
 
-      z1 += (-1.0f / 6.0f) * z6;
-      z2 += (-1.0f / 6.0f) * z6;
-      z3 += (1.0f / 6.0f) * z6;
-      z4 += (1.0f / 6.0f) * z6;
-      z5 = z6;
+U_tensor[0][w][idx] = z0;
+U_tensor[1][w][idx] = z1;
+U_tensor[2][w][idx] = z2;
+U_tensor[3][w][idx] = z3;
+U_tensor[4][w][idx] = z4;
+U_tensor[5][w][idx] = z5;
+}
+#pragma omp simd aligned(packed_filter_tensor, U_tensor: 64)
+for (int64_t h = 0; h < us.h; ++h) {
+z6 = U_tensor[h][0][idx];
 
-      U_tensor[0][w][idx] = z0;
-      U_tensor[1][w][idx] = z1;
-      U_tensor[2][w][idx] = z2;
-      U_tensor[3][w][idx] = z3;
-      U_tensor[4][w][idx] = z4;
-      U_tensor[5][w][idx] = z5;
-    }
+z0 = (1.0f / 4.0f) * z6;
+z1 = (-1.0f / 6.0f) * z6;
+z2 = (-1.0f / 6.0f) * z6;
+z3 = (1.0f / 24.0f) * z6;
+z4 = (1.0f / 24.0f) * z6;
 
-    for (int64_t h = 0; h < us.h; ++h) {
-      z6 = U_tensor[h][0][idx];
+z6 = U_tensor[h][1][idx];
 
-      z0 = (1.0f / 4.0f) * z6;
-      z1 = (-1.0f / 6.0f) * z6;
-      z2 = (-1.0f / 6.0f) * z6;
-      z3 = (1.0f / 24.0f) * z6;
-      z4 = (1.0f / 24.0f) * z6;
+z1 += (-1.0f / 6.0f) * z6;
+z2 += (1.0f / 6.0f) * z6;
+z3 += (1.0f / 12.0f) * z6;
+z4 += (-1.0f / 12.0f) * z6;
 
-      z6 = U_tensor[h][1][idx];
+z6 = U_tensor[h][2][idx];
 
-      z1 += (-1.0f / 6.0f) * z6;
-      z2 += (1.0f / 6.0f) * z6;
-      z3 += (1.0f / 12.0f) * z6;
-      z4 += (-1.0f / 12.0f) * z6;
+z1 += (-1.0f / 6.0f) * z6;
+z2 += (-1.0f / 6.0f) * z6;
+z3 += (1.0f / 6.0f) * z6;
+z4 += (1.0f / 6.0f) * z6;
+z5 = z6;
 
-      z6 = U_tensor[h][2][idx];
-
-      z1 += (-1.0f / 6.0f) * z6;
-      z2 += (-1.0f / 6.0f) * z6;
-      z3 += (1.0f / 6.0f) * z6;
-      z4 += (1.0f / 6.0f) * z6;
-      z5 = z6;
-
-      U_tensor[h][0][idx] = z0;
-      U_tensor[h][1][idx] = z1;
-      U_tensor[h][2][idx] = z2;
-      U_tensor[h][3][idx] = z3;
-      U_tensor[h][4][idx] = z4;
-      U_tensor[h][5][idx] = z5;
-    }
-  }
+U_tensor[h][0][idx] = z0;
+U_tensor[h][1][idx] = z1;
+U_tensor[h][2][idx] = z2;
+U_tensor[h][3][idx] = z3;
+U_tensor[h][4][idx] = z4;
+U_tensor[h][5][idx] = z5;
+}
+}
 }
 
 void output_transform(float *__restrict__ M,
@@ -208,7 +213,9 @@ void output_transform(float *__restrict__ M,
   Y_tensor_t Y_tensor = (Y_tensor_t)Y;
   float z0, z1, z2, z3, z4;
 
+  #pragma omp parallel for private(z0, z1, z2, z3, z4) schedule(static) num_threads(NUM_THREADS)
   for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
+    #pragma omp simd aligned(M_tensor, Y_tensor: 64)
     for (int64_t w = 0; w < ti.tile_in_w; ++w) {
       z4 = M_tensor[0][w][idx];
       z0 = z4;
@@ -245,7 +252,7 @@ void output_transform(float *__restrict__ M,
       Y_tensor[2][w][idx] = z2;
       Y_tensor[3][w][idx] = z3;
     }
-
+    #pragma omp simd aligned(M_tensor, Y_tensor: 64) 
     for (int64_t h = 0; h < ti.tile_out_h; ++h) {
       z4 = Y_tensor[h][0][idx];
 
@@ -293,6 +300,7 @@ void filter_packing(float *__restrict__ filter, float *__restrict__ packed_filte
   filter_tensor_t filter_tensor = (filter_tensor_t)filter;
   packed_filter_tensor_t packed_filter_tensor = (packed_filter_tensor_t)packed_filter;
 
+  #pragma omp parallel for schedule(static) num_threads(32) collapse(4) 
   for (int64_t h = 0; h < fs.h; ++h)
     for (int64_t w = 0; w < fs.w; ++w)
       for (int64_t oc = 0; oc < fs.oc; oc++)
@@ -309,6 +317,7 @@ void image_packing(float *__restrict__ image,
   packedImage_tensor_t packed_image_tensor = (packedImage_tensor_t)packed_image;
   image_tensor_t image_tensor = (image_tensor_t)image;
 
+  #pragma omp parallel for schedule(static) num_threads(32) collapse(4) 
   for (int64_t tile = 0; tile < ti.num_tiles; tile++) {
     for (int64_t ic = 0; ic < is.ic; ic++) {
       for (int64_t h = 0; h < ti.tile_in_h; ++h) {
@@ -326,27 +335,30 @@ void image_packing(float *__restrict__ image,
 }
 
 void output_unpacking_store(float *__restrict__ Y,
-                            float *__restrict__ out,
-                            const out_shape_t os,
-                            const tiling_info_t ti) {
+              float *__restrict__ out,
+              const out_shape_t os,
+              const tiling_info_t ti) {
   typedef float(*Y_tensor_t)[ti.tile_in_w][os.oc][ti.num_tiles];
   typedef float(*out_tensor_t)[os.oc][os.h][os.w];
   Y_tensor_t Y_tensor = (Y_tensor_t)Y;
   out_tensor_t out_tensor = (out_tensor_t)out;
 
+  #pragma omp parallel for schedule(static) num_threads(32) collapse(4)
   for (int64_t h = 0; h < ti.tile_out_h; ++h) {
     for (int64_t w = 0; w < ti.tile_out_w; ++w) {
-      for (int64_t oc = 0; oc < os.oc; oc++) {
-        for (int64_t tile = 0; tile < ti.num_tiles; tile++) {
+      for (int64_t oc = 0; oc < os.oc; ++oc) {
+        for (int64_t tile = 0; tile < ti.num_tiles; ++tile) {
           tile_index_t tidx = get_tile_index(tile, ti);
           int64_t batch = tidx.b, ww = tidx.tw, hh = tidx.th;
-          if (hh * 4 + h < os.h && ww * 4 + w < os.w)
-            out_tensor[batch][oc][(hh * 4 + h)][(ww * 4 + w)] = Y_tensor[h][w][oc][tile];
-        }
-      }
+          if (hh * 4 + h < os.h && ww * 4 + w < os.w) {
+          out_tensor[batch][oc][(hh * 4 + h)][(ww * 4 + w)] = Y_tensor[h][w][oc][tile];
+          }
+    }
     }
   }
+  }
 }
+
 
 void sgemm(const int64_t M, const int64_t N, const int64_t K, float *A, float *B, float *C) {
   typedef float(*A_tensor_t)[K];
@@ -355,16 +367,18 @@ void sgemm(const int64_t M, const int64_t N, const int64_t K, float *A, float *B
   A_tensor_t A_tensor = (A_tensor_t)A;
   B_tensor_t B_tensor = (B_tensor_t)B;
   C_tensor_t C_tensor = (C_tensor_t)C;
-
+  #pragma omp parallel for schedule(static) num_threads(32) collapse(2)
   for (int64_t m = 0; m < M; ++m) {
     for (int64_t n = 0; n < N; ++n) {
       C_tensor[n][m] = 0;
+      #pragma omp simd aligned(A_tensor, B_tensor, C_tensor: 64)
       for (int64_t k = 0; k < K; ++k) {
         C_tensor[n][m] += A_tensor[m][k] * B_tensor[n][k];
       }
     }
   }
 }
+
 
 void winograd_convolution(
     float *__restrict__ image, /**< float [batch_num][input_channel_num][image_height][image_width] */
@@ -396,6 +410,7 @@ void winograd_convolution(
   image_packing(image, packed_image, is, ti);
   image_transform(packed_image, V, vs, ti, vs.ic * vs.num_tiles);
 
+  #pragma omp parallel for schedule(static) num_threads(32) collapse(2)
   for (int64_t h = 0; h < ti.tile_in_h; ++h) {
     for (int64_t w = 0; w < ti.tile_in_w; ++w) {
       typedef float(*U_tensor_t)[ti.tile_in_w][us.oc][us.ic];
@@ -404,12 +419,16 @@ void winograd_convolution(
       U_tensor_t U_tensor = (U_tensor_t)U;
       V_tensor_t V_tensor = (V_tensor_t)V;
       M_tensor_t M_tensor = (M_tensor_t)M;
-      sgemm(vs.num_tiles,
-            us.oc,
-            us.ic,
-            (float *)(V_tensor[h][w]),
-            (float *)(U_tensor[h][w]),
-            (float *)(M_tensor[h][w]));
+
+      #pragma omp simd aligned(U_tensor, V_tensor, M_tensor: 64)
+      for (int64_t tile = 0; tile < vs.num_tiles; ++tile) {
+        for (int64_t oc = 0; oc < us.oc; ++oc) {
+          M_tensor[h][w][oc][tile] = 0;
+          for (int64_t ic = 0; ic < us.ic; ++ic) {
+            M_tensor[h][w][oc][tile] += V_tensor[h][w][tile][ic] * U_tensor[h][w][oc][ic];
+          }
+        }
+      }
     }
   }
 
