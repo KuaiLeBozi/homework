@@ -20,50 +20,35 @@ void image_transform(float *__restrict__ packed_image,
 
   float z0, z1, z2, z3, z4, z5, z6;
 
-  #pragma omp parallel for private(z0, z1, z2, z3, z4, z5, z6) schedule(static) num_threads(NUM_THREADS)
-  for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
+  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS)
+  for (int64_t w = 0; w < ti.tile_in_w; ++w) {
     #pragma omp simd aligned(packed_image_tensor, V_tensor: 64)
-    for (int64_t w = 0; w < ti.tile_in_w; ++w) {
-      z6 = packed_image_tensor[0][w][idx];
+    for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
+      // 将z6预先读取到寄存器中以减少内存访问
+      float z6_0 = packed_image_tensor[0][w][idx];
+      float z6_1 = packed_image_tensor[1][w][idx];
+      float z6_2 = packed_image_tensor[2][w][idx];
+      float z6_3 = packed_image_tensor[3][w][idx];
+      float z6_4 = packed_image_tensor[4][w][idx];
+      float z6_5 = packed_image_tensor[5][w][idx];
 
-      z0 = 4.0f * z6;
+      // 计算中间结果
+      float z0 = 4.0f * z6_0;
+      float z1 = -4.0f * z6_1;
+      float z2 = 4.0f * z6_1;
+      float z3 = -2.0f * z6_1;
+      float z4 = 2.0f * z6_1;
+      float z5 = 4.0f * z6_1;
 
-      z6 = packed_image_tensor[1][w][idx];
+      // 累积计算
+      z0 += -5.0f * z6_2 + z6_4;
+      z1 += -4.0f * z6_2 + z6_3 + z6_4;
+      z2 += -4.0f * z6_2 - z6_3 + z6_4;
+      z3 += -z6_2 + 2.0f * z6_3 + z6_4;
+      z4 += -z6_2 - 2.0f * z6_3 + z6_4;
+      z5 += -5.0f * z6_3 + z6_5;
 
-      z1 = -4.0f * z6;
-      z2 = 4.0f * z6;
-      z3 = -2.0f * z6;
-      z4 = 2.0f * z6;
-      z5 = 4.0f * z6;
-
-      z6 = packed_image_tensor[2][w][idx];
-
-      z0 += -5.0f * z6;
-      z1 += -4.0f * z6;
-      z2 += -4.0f * z6;
-      z3 += -z6;
-      z4 += -z6;
-
-      z6 = packed_image_tensor[3][w][idx];
-
-      z1 += z6;
-      z2 += -z6;
-      z3 += 2.0f * z6;
-      z4 += -2.0f * z6;
-      z5 += -5.0f * z6;
-
-      z6 = packed_image_tensor[4][w][idx];
-
-      z0 += z6;
-      z1 += z6;
-      z2 += z6;
-      z3 += z6;
-      z4 += z6;
-
-      z6 = packed_image_tensor[5][w][idx];
-
-      z5 += z6;
-
+      // 一次性写回结果
       V_tensor[0][w][idx] = z0;
       V_tensor[1][w][idx] = z1;
       V_tensor[2][w][idx] = z2;
@@ -71,47 +56,33 @@ void image_transform(float *__restrict__ packed_image,
       V_tensor[4][w][idx] = z4;
       V_tensor[5][w][idx] = z5;
     }
-    #pragma omp simd aligned(packed_image_tensor, V_tensor: 64)
-    for (int64_t h = 0; h < ti.tile_in_h; ++h) {
-      z6 = V_tensor[h][0][idx];
+  }
 
-      z0 = 4.0f * z6;
+  // 针对第二个循环做类似优化
+  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS)
+  for (int64_t h = 0; h < ti.tile_in_h; ++h) {
+    #pragma omp simd aligned(V_tensor: 64)
+    for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
+      float z6_0 = V_tensor[h][0][idx];
+      float z6_1 = V_tensor[h][1][idx];
+      float z6_2 = V_tensor[h][2][idx];
+      float z6_3 = V_tensor[h][3][idx];
+      float z6_4 = V_tensor[h][4][idx];
+      float z6_5 = V_tensor[h][5][idx];
 
-      z6 = V_tensor[h][1][idx];
+      float z0 = 4.0f * z6_0;
+      float z1 = -4.0f * z6_1;
+      float z2 = 4.0f * z6_1;
+      float z3 = -2.0f * z6_1;
+      float z4 = 2.0f * z6_1;
+      float z5 = 4.0f * z6_1;
 
-      z1 = -4.0f * z6;
-      z2 = 4.0f * z6;
-      z3 = -2.0f * z6;
-      z4 = 2.0f * z6;
-      z5 = 4.0f * z6;
-
-      z6 = V_tensor[h][2][idx];
-
-      z0 += -5.0f * z6;
-      z1 += -4.0f * z6;
-      z2 += -4.0f * z6;
-      z3 += -z6;
-      z4 += -z6;
-
-      z6 = V_tensor[h][3][idx];
-
-      z1 += z6;
-      z2 += -z6;
-      z3 += 2.0f * z6;
-      z4 += -2.0f * z6;
-      z5 += -5.0f * z6;
-
-      z6 = V_tensor[h][4][idx];
-
-      z0 += z6;
-      z1 += z6;
-      z2 += z6;
-      z3 += z6;
-      z4 += z6;
-
-      z6 = V_tensor[h][5][idx];
-
-      z5 += z6;
+      z0 += -5.0f * z6_2 + z6_4;
+      z1 += -4.0f * z6_2 + z6_3 + z6_4;
+      z2 += -4.0f * z6_2 - z6_3 + z6_4;
+      z3 += -z6_2 + 2.0f * z6_3 + z6_4;
+      z4 += -z6_2 - 2.0f * z6_3 + z6_4;
+      z5 += -5.0f * z6_3 + z6_5;
 
       V_tensor[h][0][idx] = z0;
       V_tensor[h][1][idx] = z1;
