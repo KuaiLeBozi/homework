@@ -4,11 +4,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <omp.h>
+#include <immintrin.h>
 #include <algorithm>
 
 #include "utils.h"
 
-#define NUM_THREADS 64
+#define NUM_THREADS1 64
+#define NUM_THREADS2 64
 void image_transform(float *__restrict__ packed_image,
                      float *__restrict__ V,
                      const V_shape_t vs,
@@ -21,9 +23,8 @@ void image_transform(float *__restrict__ packed_image,
 
   float z0, z1, z2, z3, z4, z5, z6;
 
-  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS)
+  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS1) collapse(2)
   for (int64_t w = 0; w < ti.tile_in_w; ++w) {
-    #pragma omp simd aligned(packed_image_tensor, V_tensor: 64)
     for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
       // 将z6预先读取到寄存器中以减少内存访问
       float z6_0 = packed_image_tensor[0][w][idx];
@@ -60,9 +61,8 @@ void image_transform(float *__restrict__ packed_image,
   }
 
   // 针对第二个循环做类似优化
-  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS)
+  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS1) collapse(2)
   for (int64_t h = 0; h < ti.tile_in_h; ++h) {
-    #pragma omp simd aligned(V_tensor: 64)
     for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
       float z6_0 = V_tensor[h][0][idx];
       float z6_1 = V_tensor[h][1][idx];
@@ -108,7 +108,7 @@ void filter_transform(float *__restrict__ packed_filter,
   float z0, z1, z2, z3, z4, z5, z6;
   
   // 修改并行化策略，在最外层合并两个维度
-  #pragma omp parallel for collapse(2) schedule(static) num_threads(NUM_THREADS)
+  #pragma omp parallel for collapse(2) schedule(static) num_threads(NUM_THREADS1)
   for (int64_t w = 0; w < fs.w; ++w) {
     for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
       z6 = packed_filter_tensor[0][w][idx];
@@ -145,7 +145,7 @@ void filter_transform(float *__restrict__ packed_filter,
   }
 
   // 第二次变换也采用类似的并行化策略
-  #pragma omp parallel for collapse(2) schedule(static) num_threads(NUM_THREADS)
+  #pragma omp parallel for collapse(2) schedule(static) num_threads(NUM_THREADS1)
   for (int64_t h = 0; h < us.h; ++h) {
     for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
       z6 = U_tensor[h][0][idx];
@@ -182,130 +182,145 @@ void filter_transform(float *__restrict__ packed_filter,
 }
 
 void output_transform(float *__restrict__ M,
-                      float *__restrict__ Y,
-                      const tiling_info_t ti,
-                      const int64_t collapsed_dim_size) {
-  typedef float(*M_tensor_t)[ti.tile_in_w][collapsed_dim_size];
-  typedef float(*Y_tensor_t)[ti.tile_in_w][collapsed_dim_size];
-  M_tensor_t M_tensor = (M_tensor_t)M;
-  Y_tensor_t Y_tensor = (Y_tensor_t)Y;
-  float z0, z1, z2, z3, z4;
+  float *__restrict__ Y,
+  const tiling_info_t ti,
+  const int64_t collapsed_dim_size) {
+typedef float(*M_tensor_t)[ti.tile_in_w][collapsed_dim_size];
+typedef float(*Y_tensor_t)[ti.tile_in_w][collapsed_dim_size];
+M_tensor_t M_tensor = (M_tensor_t)M;
+Y_tensor_t Y_tensor = (Y_tensor_t)Y;
+float z0, z1, z2, z3, z4;
 
-  #pragma omp parallel for private(z0, z1, z2, z3, z4) schedule(static) num_threads(NUM_THREADS)
-  for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
-    #pragma omp simd aligned(M_tensor, Y_tensor: 64)
-    for (int64_t w = 0; w < ti.tile_in_w; ++w) {
-      z4 = M_tensor[0][w][idx];
-      z0 = z4;
+#pragma omp parallel for private(z0, z1, z2, z3, z4) schedule(static) num_threads(NUM_THREADS1)
+for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
+#pragma omp simd aligned(M_tensor, Y_tensor: 64)
+for (int64_t w = 0; w < ti.tile_in_w; ++w) {
+z4 = M_tensor[0][w][idx];
+z0 = z4;
 
-      z4 = M_tensor[1][w][idx];
-      z0 = z0 + z4;
-      z1 = z4;
-      z2 = z4;
-      z3 = z4;
+z4 = M_tensor[1][w][idx];
+z0 = z0 + z4;
+z1 = z4;
+z2 = z4;
+z3 = z4;
 
-      z4 = M_tensor[2][w][idx];
-      z0 += z4;
-      z1 += -z4;
-      z2 += z4;
-      z3 += -z4;
+z4 = M_tensor[2][w][idx];
+z0 += z4;
+z1 += -z4;
+z2 += z4;
+z3 += -z4;
 
-      z4 = M_tensor[3][w][idx];
-      z0 += z4;
-      z1 += 2.0f * z4;
-      z2 += 4.0f * z4;
-      z3 += 8.0f * z4;
+z4 = M_tensor[3][w][idx];
+z0 += z4;
+z1 += 2.0f * z4;
+z2 += 4.0f * z4;
+z3 += 8.0f * z4;
 
-      z4 = M_tensor[4][w][idx];
-      z0 += z4;
-      z1 += -2.0f * z4;
-      z2 += 4.0f * z4;
-      z3 += -8.0f * z4;
+z4 = M_tensor[4][w][idx];
+z0 += z4;
+z1 += -2.0f * z4;
+z2 += 4.0f * z4;
+z3 += -8.0f * z4;
 
-      z4 = M_tensor[5][w][idx];
-      z3 += z4;
+z4 = M_tensor[5][w][idx];
+z3 += z4;
 
-      Y_tensor[0][w][idx] = z0;
-      Y_tensor[1][w][idx] = z1;
-      Y_tensor[2][w][idx] = z2;
-      Y_tensor[3][w][idx] = z3;
-    }
-    #pragma omp simd aligned(M_tensor, Y_tensor: 64) 
-    for (int64_t h = 0; h < ti.tile_out_h; ++h) {
-      z4 = Y_tensor[h][0][idx];
+Y_tensor[0][w][idx] = z0;
+Y_tensor[1][w][idx] = z1;
+Y_tensor[2][w][idx] = z2;
+Y_tensor[3][w][idx] = z3;
+}
+#pragma omp simd aligned(M_tensor, Y_tensor: 64) 
+for (int64_t h = 0; h < ti.tile_out_h; ++h) {
+z4 = Y_tensor[h][0][idx];
 
-      z0 = z4;
+z0 = z4;
 
-      z4 = Y_tensor[h][1][idx];
-      z0 += z4;
-      z1 = z4;
-      z2 = z4;
-      z3 = z4;
+z4 = Y_tensor[h][1][idx];
+z0 += z4;
+z1 = z4;
+z2 = z4;
+z3 = z4;
 
-      z4 = Y_tensor[h][2][idx];
-      z0 += z4;
-      z1 += -z4;
-      z2 += z4;
-      z3 += -z4;
+z4 = Y_tensor[h][2][idx];
+z0 += z4;
+z1 += -z4;
+z2 += z4;
+z3 += -z4;
 
-      z4 = Y_tensor[h][3][idx];
-      z0 += z4;
-      z1 += 2.0f * z4;
-      z2 += 4.0f * z4;
-      z3 += 8.0f * z4;
+z4 = Y_tensor[h][3][idx];
+z0 += z4;
+z1 += 2.0f * z4;
+z2 += 4.0f * z4;
+z3 += 8.0f * z4;
 
-      z4 = Y_tensor[h][4][idx];
-      z0 += z4;
-      z1 += -2.0f * z4;
-      z2 += 4.0f * z4;
-      z3 += -8.0f * z4;
+z4 = Y_tensor[h][4][idx];
+z0 += z4;
+z1 += -2.0f * z4;
+z2 += 4.0f * z4;
+z3 += -8.0f * z4;
 
-      z4 = Y_tensor[h][5][idx];
+z4 = Y_tensor[h][5][idx];
 
-      z3 += z4;
+z3 += z4;
 
-      Y_tensor[h][0][idx] = z0;
-      Y_tensor[h][1][idx] = z1;
-      Y_tensor[h][2][idx] = z2;
-      Y_tensor[h][3][idx] = z3;
-    }
-  }
+Y_tensor[h][0][idx] = z0;
+Y_tensor[h][1][idx] = z1;
+Y_tensor[h][2][idx] = z2;
+Y_tensor[h][3][idx] = z3;
+}
+}
 }
 
+// 对 filter_packing 采用缓存分块优化，减小内存访存延迟
 void filter_packing(float *__restrict__ filter, float *__restrict__ packed_filter, const filter_shape_t fs) {
   typedef float(*filter_tensor_t)[fs.ic][fs.h][fs.w];
   typedef float(*packed_filter_tensor_t)[fs.w][fs.oc][fs.ic];
   filter_tensor_t filter_tensor = (filter_tensor_t)filter;
   packed_filter_tensor_t packed_filter_tensor = (packed_filter_tensor_t)packed_filter;
 
-  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS) collapse(4) 
-  for (int64_t h = 0; h < fs.h; ++h)
-    for (int64_t w = 0; w < fs.w; ++w)
-      for (int64_t oc = 0; oc < fs.oc; oc++)
-        for (int64_t ic = 0; ic < fs.ic; ic++)
-          packed_filter_tensor[h][w][oc][ic] = filter_tensor[oc][ic][h][w];
+  const int TILE_SIZE = 128; // 可根据实际情况调整块大小
+  
+  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS1) collapse(4)
+  for (int64_t h0 = 0; h0 < fs.h; h0 += TILE_SIZE) {
+    for (int64_t w0 = 0; w0 < fs.w; w0 += TILE_SIZE) {
+      for (int64_t oc0 = 0; oc0 < fs.oc; oc0 += TILE_SIZE) {
+        for (int64_t ic0 = 0; ic0 < fs.ic; ic0 += TILE_SIZE) {
+          for (int64_t h = h0; h < std::min(fs.h, h0 + TILE_SIZE); h++) {
+            for (int64_t w = w0; w < std::min(fs.w, w0 + TILE_SIZE); w++) {
+              for (int64_t oc = oc0; oc < std::min(fs.oc, oc0 + TILE_SIZE); oc++) {
+                for (int64_t ic = ic0; ic < std::min(fs.ic, ic0 + TILE_SIZE); ic++) {
+                  packed_filter_tensor[h][w][oc][ic] = filter_tensor[oc][ic][h][w];
+                }//地址连续，减少内存访问延迟
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 void image_packing(float *__restrict__ image,
-                   float *__restrict__ packed_image,
-                   const image_shape_t is,
-                   const tiling_info_t ti) {
-  typedef float(*packedImage_tensor_t)[ti.tile_in_w][ti.num_tiles][is.ic];
-  typedef float(*image_tensor_t)[is.ic][is.h][is.w];
-  packedImage_tensor_t packed_image_tensor = (packedImage_tensor_t)packed_image;
-  image_tensor_t image_tensor = (image_tensor_t)image;
+  float *__restrict__ packed_image,
+  const image_shape_t is,
+  const tiling_info_t ti) {
+typedef float(*packedImage_tensor_t)[ti.tile_in_w][ti.num_tiles][is.ic];
+typedef float(*image_tensor_t)[is.ic][is.h][is.w];
+packedImage_tensor_t packed_image_tensor = (packedImage_tensor_t)packed_image;
+image_tensor_t image_tensor = (image_tensor_t)image;
 
-  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS) collapse(4) 
-  for (int64_t tile = 0; tile < ti.num_tiles; tile++) {
-    for (int64_t ic = 0; ic < is.ic; ic++) {
-      for (int64_t h = 0; h < ti.tile_in_h; ++h) {
-        for (int64_t w = 0; w < ti.tile_in_w; ++w) {
-          tile_index_t tidx = get_tile_index(tile, ti);
-          int64_t batch = tidx.b, ww = tidx.tw, hh = tidx.th;
-          if (hh * 4 + h < is.h && ww * 4 + w < is.w)
-            packed_image_tensor[h][w][tile][ic] = image_tensor[batch][ic][(hh * 4 + h)][(ww * 4 + w)];
-          else
-            packed_image_tensor[h][w][tile][ic] = 0;
+#pragma omp parallel for schedule(static) num_threads(NUM_THREADS1) collapse(4) 
+for (int64_t tile = 0; tile < ti.num_tiles; tile++) {
+  for (int64_t ic = 0; ic < is.ic; ic++) {
+    for (int64_t h = 0; h < ti.tile_in_h; ++h) {
+      for (int64_t w = 0; w < ti.tile_in_w; ++w) {
+        tile_index_t tidx = get_tile_index(tile, ti);
+        int64_t batch = tidx.b, ww = tidx.tw, hh = tidx.th;
+        if (hh * 4 + h < is.h && ww * 4 + w < is.w)
+          packed_image_tensor[h][w][tile][ic] = image_tensor[batch][ic][(hh * 4 + h)][(ww * 4 + w)];
+        else
+          packed_image_tensor[h][w][tile][ic] = 0;
         }
       }
     }
@@ -321,10 +336,11 @@ void output_unpacking_store(float *__restrict__ Y,
   Y_tensor_t Y_tensor = (Y_tensor_t)Y;
   out_tensor_t out_tensor = (out_tensor_t)out;
 
-  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS) collapse(4)
+  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS2) collapse(3)
   for (int64_t h = 0; h < ti.tile_out_h; ++h) {
     for (int64_t w = 0; w < ti.tile_out_w; ++w) {
       for (int64_t oc = 0; oc < os.oc; ++oc) {
+        #pragma omp simd aligned(Y_tensor, out_tensor: 64)
         for (int64_t tile = 0; tile < ti.num_tiles; ++tile) {
           tile_index_t tidx = get_tile_index(tile, ti);
           int64_t batch = tidx.b, ww = tidx.tw, hh = tidx.th;
@@ -339,21 +355,28 @@ void output_unpacking_store(float *__restrict__ Y,
 
 
 void sgemm(const int64_t M, const int64_t N, const int64_t K, float *A, float *B, float *C) {
-  typedef float(*A_tensor_t)[K];
-  typedef float(*B_tensor_t)[K];
-  typedef float(*C_tensor_t)[M];
+  typedef float (*A_tensor_t)[K];
+  typedef float (*B_tensor_t)[K];
+  typedef float (*C_tensor_t)[M];
   A_tensor_t A_tensor = (A_tensor_t)A;
   B_tensor_t B_tensor = (B_tensor_t)B;
   C_tensor_t C_tensor = (C_tensor_t)C;
-  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS) collapse(2)
+
+  // 确保数据对齐
+  #pragma omp parallel for schedule(static) num_threads(64) collapse(2)
   for (int64_t m = 0; m < M; ++m) {
-    for (int64_t n = 0; n < N; ++n) {
-      C_tensor[n][m] = 0;
-      #pragma omp simd aligned(A_tensor, B_tensor, C_tensor: 64)
-      for (int64_t k = 0; k < K; ++k) {
-        C_tensor[n][m] += A_tensor[m][k] * B_tensor[n][k];
+      for (int64_t n = 0; n < N; ++n) {
+          __m512 c_val = _mm512_setzero_ps();//全部设为0
+          for (int64_t k = 0; k < K; k += 16) {
+              // 加载A和B的块
+              __m512 a_val = _mm512_load_ps(&A_tensor[m][k]);//加载16个float
+              __m512 b_val = _mm512_load_ps(&B_tensor[n][k]);//加载16个float
+              // 执行FMA操作
+              c_val = _mm512_fmadd_ps(a_val, b_val, c_val);//a*b+c
+          }
+          // 存储结果
+          _mm512_store_ps(&C_tensor[n][m], c_val);
       }
-    }
   }
 }
 
@@ -391,7 +414,7 @@ void winograd_convolution(
   // 定义分块大小
   const int BLOCK_SIZE = 64;  // 根据实际缓存大小调整
   
-  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS) collapse(4)
+  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS1) collapse(4) 
   for (int64_t h = 0; h < ti.tile_in_h; ++h) {
     for (int64_t w = 0; w < ti.tile_in_w; ++w) {
       for (int64_t tile_block = 0; tile_block < vs.num_tiles; tile_block += BLOCK_SIZE) {
@@ -414,12 +437,12 @@ void winograd_convolution(
           for (int64_t ic = 0; ic < us.ic; ic += BLOCK_SIZE) {
             const int ic_block_size = std::min(BLOCK_SIZE, (int)(us.ic - ic));
             
-            #pragma omp simd collapse(2)
+            #pragma omp simd collapse(2) 
             for (int64_t tile_i = 0; tile_i < tile_block_size; ++tile_i) {
               for (int64_t oc_i = 0; oc_i < oc_block_size; ++oc_i) {
                 float sum = 0.0f;
                 // 向量化内部循环
-                #pragma omp simd reduction(+:sum)
+                #pragma omp simd reduction(+:sum) aligned(U_tensor, V_tensor: 64) 
                 for (int64_t ic_i = 0; ic_i < ic_block_size; ++ic_i) {
                   sum += V_tensor[h][w][tile_block + tile_i][ic + ic_i] * 
                          U_tensor[h][w][oc_block + oc_i][ic + ic_i];
@@ -429,11 +452,20 @@ void winograd_convolution(
             }
           }
 
-          // 将局部结果写回全局内存
-          #pragma omp simd collapse(2)
-          for (int64_t tile_i = 0; tile_i < tile_block_size; ++tile_i) {
+           // 原始写回循环被优化为先转置 local_sum 后利用 memcpy 批量拷贝
+           {
+            float local_sum_t[BLOCK_SIZE * BLOCK_SIZE];
+            // 转置 local_sum，使每个 oc_i 对应的 tile 值连续存储
             for (int64_t oc_i = 0; oc_i < oc_block_size; ++oc_i) {
-              M_tensor[h][w][oc_block + oc_i][tile_block + tile_i] = local_sum[tile_i][oc_i];
+                for (int64_t tile_i = 0; tile_i < tile_block_size; ++tile_i) {
+                    local_sum_t[oc_i * tile_block_size + tile_i] = local_sum[tile_i][oc_i];
+                }
+            }
+            // 对于每个 oc_i ，直接 memcpy 拷贝连续内存块
+            for (int64_t oc_i = 0; oc_i < oc_block_size; ++oc_i) {
+                memcpy(&M_tensor[h][w][oc_block + oc_i][tile_block],
+                       &local_sum_t[oc_i * tile_block_size],
+                       tile_block_size * sizeof(float));
             }
           }
         }
