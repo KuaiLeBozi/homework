@@ -193,7 +193,7 @@ float z0, z1, z2, z3, z4;
 
 #pragma omp parallel for private(z0, z1, z2, z3, z4) schedule(static) num_threads(NUM_THREADS1)
 for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
-#pragma omp simd aligned(M_tensor, Y_tensor: 64)
+#pragma omp simd aligned(M_tensor, Y_tensor: 64) 
 for (int64_t w = 0; w < ti.tile_in_w; ++w) {
 z4 = M_tensor[0][w][idx];
 z0 = z4;
@@ -290,7 +290,10 @@ void filter_packing(float *__restrict__ filter, float *__restrict__ packed_filte
             for (int64_t w = w0; w < std::min(fs.w, w0 + TILE_SIZE); w++) {
               for (int64_t oc = oc0; oc < std::min(fs.oc, oc0 + TILE_SIZE); oc++) {
                 for (int64_t ic = ic0; ic < std::min(fs.ic, ic0 + TILE_SIZE); ic++) {
-                  packed_filter_tensor[h][w][oc][ic] = filter_tensor[oc][ic][h][w];
+                  // 使用memcpy进行内存拷贝
+                  memcpy(&packed_filter_tensor[h][w][oc][ic], 
+                         &filter_tensor[oc][ic][h][w], 
+                         sizeof(float));
                 }//地址连续，减少内存访问延迟
               }
             }
@@ -317,14 +320,18 @@ for (int64_t tile = 0; tile < ti.num_tiles; tile++) {
       for (int64_t w = 0; w < ti.tile_in_w; ++w) {
         tile_index_t tidx = get_tile_index(tile, ti);
         int64_t batch = tidx.b, ww = tidx.tw, hh = tidx.th;
-        if (hh * 4 + h < is.h && ww * 4 + w < is.w)
-          packed_image_tensor[h][w][tile][ic] = image_tensor[batch][ic][(hh * 4 + h)][(ww * 4 + w)];
-        else
+        if (hh * 4 + h < is.h && ww * 4 + w < is.w) {
+          // 使用memcpy进行内存拷贝
+          memcpy(&packed_image_tensor[h][w][tile][ic], 
+                 &image_tensor[batch][ic][(hh * 4 + h)][(ww * 4 + w)], 
+                 sizeof(float));
+        } else {
           packed_image_tensor[h][w][tile][ic] = 0;
         }
       }
     }
   }
+}
 }
 
 void output_unpacking_store(float *__restrict__ Y,
@@ -345,11 +352,14 @@ void output_unpacking_store(float *__restrict__ Y,
           tile_index_t tidx = get_tile_index(tile, ti);
           int64_t batch = tidx.b, ww = tidx.tw, hh = tidx.th;
           if (hh * 4 + h < os.h && ww * 4 + w < os.w) {
-          out_tensor[batch][oc][(hh * 4 + h)][(ww * 4 + w)] = Y_tensor[h][w][oc][tile];
+            // 使用memcpy进行内存拷贝
+            memcpy(&out_tensor[batch][oc][(hh * 4 + h)][(ww * 4 + w)], 
+                   &Y_tensor[h][w][oc][tile], 
+                   sizeof(float));
           }
+        }
+      }
     }
-    }
-  }
   }
 }
 
