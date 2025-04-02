@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -O3 -mavx512f -fopenmp 
+CXXFLAGS = -O3 -fopenmp -march=native 
 SRCS = winograd.cc driver.cc
 OBJS = $(SRCS:.cc=.o)
 TARGET = winograd
