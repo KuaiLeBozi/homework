@@ -193,7 +193,7 @@ float z0, z1, z2, z3, z4;
 
 #pragma omp parallel for private(z0, z1, z2, z3, z4) schedule(static) num_threads(NUM_THREADS1)
 for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
-#pragma omp simd aligned(M_tensor, Y_tensor: 64) 
+#pragma omp simd aligned(M_tensor, Y_tensor: 64)
 for (int64_t w = 0; w < ti.tile_in_w; ++w) {
 z4 = M_tensor[0][w][idx];
 z0 = z4;
@@ -290,10 +290,7 @@ void filter_packing(float *__restrict__ filter, float *__restrict__ packed_filte
             for (int64_t w = w0; w < std::min(fs.w, w0 + TILE_SIZE); w++) {
               for (int64_t oc = oc0; oc < std::min(fs.oc, oc0 + TILE_SIZE); oc++) {
                 for (int64_t ic = ic0; ic < std::min(fs.ic, ic0 + TILE_SIZE); ic++) {
-                  // 使用memcpy进行内存拷贝
-                  memcpy(&packed_filter_tensor[h][w][oc][ic], 
-                         &filter_tensor[oc][ic][h][w], 
-                         sizeof(float));
+                  packed_filter_tensor[h][w][oc][ic] = filter_tensor[oc][ic][h][w];
                 }//地址连续，减少内存访问延迟
               }
             }
@@ -320,18 +317,14 @@ for (int64_t tile = 0; tile < ti.num_tiles; tile++) {
       for (int64_t w = 0; w < ti.tile_in_w; ++w) {
         tile_index_t tidx = get_tile_index(tile, ti);
         int64_t batch = tidx.b, ww = tidx.tw, hh = tidx.th;
-        if (hh * 4 + h < is.h && ww * 4 + w < is.w) {
-          // 使用memcpy进行内存拷贝
-          memcpy(&packed_image_tensor[h][w][tile][ic], 
-                 &image_tensor[batch][ic][(hh * 4 + h)][(ww * 4 + w)], 
-                 sizeof(float));
-        } else {
+        if (hh * 4 + h < is.h && ww * 4 + w < is.w)
+          packed_image_tensor[h][w][tile][ic] = image_tensor[batch][ic][(hh * 4 + h)][(ww * 4 + w)];
+        else
           packed_image_tensor[h][w][tile][ic] = 0;
         }
       }
     }
   }
-}
 }
 
 void output_unpacking_store(float *__restrict__ Y,
@@ -352,14 +345,11 @@ void output_unpacking_store(float *__restrict__ Y,
           tile_index_t tidx = get_tile_index(tile, ti);
           int64_t batch = tidx.b, ww = tidx.tw, hh = tidx.th;
           if (hh * 4 + h < os.h && ww * 4 + w < os.w) {
-            // 使用memcpy进行内存拷贝
-            memcpy(&out_tensor[batch][oc][(hh * 4 + h)][(ww * 4 + w)], 
-                   &Y_tensor[h][w][oc][tile], 
-                   sizeof(float));
+          out_tensor[batch][oc][(hh * 4 + h)][(ww * 4 + w)] = Y_tensor[h][w][oc][tile];
           }
-        }
-      }
     }
+    }
+  }
   }
 }
 
@@ -372,7 +362,6 @@ void sgemm(const int64_t M, const int64_t N, const int64_t K, float *A, float *B
   B_tensor_t B_tensor = (B_tensor_t)B;
   C_tensor_t C_tensor = (C_tensor_t)C;
 
-  // 确保数据对齐
   #pragma omp parallel for schedule(static) num_threads(64) collapse(2)
   for (int64_t m = 0; m < M; ++m) {
       for (int64_t n = 0; n < N; ++n) {
@@ -401,6 +390,9 @@ void winograd_convolution(
     const int batch_num,
     float *__restrict__ out) {
   /* new vars of shape */
+  setenv("OMP_PROC_BIND","true",1);  // 启用线程绑定
+  setenv("OMP_PLACES","cores",1);    // 绑定到物理核心
+
   const image_shape_t is = {.bs = batch_num, .ic = input_channel_num, .h = image_height, .w = image_width};
   const filter_shape_t fs = {.oc = output_channel_num, .ic = input_channel_num, .h = FLT_H, .w = FLT_W};
   const out_shape_t os = get_output_shape(is, fs);
