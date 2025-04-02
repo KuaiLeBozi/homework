@@ -347,7 +347,7 @@ void output_unpacking_store(float *__restrict__ Y,
           if (hh * 4 + h < os.h && ww * 4 + w < os.w) {
           out_tensor[batch][oc][(hh * 4 + h)][(ww * 4 + w)] = Y_tensor[h][w][oc][tile];
           }
-    }
+        }
     }
   }
   }
@@ -389,11 +389,14 @@ void winograd_convolution(
   // 定义分块大小
   const int BLOCK_SIZE = 256;  // 根据实际缓存大小调整
   
-  #pragma omp parallel for schedule(dynamic, 4) num_threads(NUM_THREADS1) collapse(4) 
+  #pragma omp parallel for schedule(dynamic, 4) collapse(4) 
   for (int64_t h = 0; h < ti.tile_in_h; ++h) {
     for (int64_t w = 0; w < ti.tile_in_w; ++w) {
       for (int64_t tile_block = 0; tile_block < vs.num_tiles; tile_block += BLOCK_SIZE) {
         for (int64_t oc_block = 0; oc_block < us.oc; oc_block += BLOCK_SIZE) {
+
+          
+
           typedef float(*U_tensor_t)[ti.tile_in_w][us.oc][us.ic];
           typedef float(*V_tensor_t)[ti.tile_in_w][vs.num_tiles][vs.ic];
           typedef float(*M_tensor_t)[ti.tile_in_w][us.oc][vs.num_tiles];
@@ -418,12 +421,13 @@ void winograd_convolution(
             for (int64_t tile_i = 0; tile_i < tile_block_size; ++tile_i) {
               for (int64_t oc_i = 0; oc_i < oc_block_size; ++oc_i) {
                 float sum = 0.0f;
-                // 向量化内部循环
+
                 #pragma omp simd reduction(+:sum) aligned(U_tensor, V_tensor: 64) 
                 for (int64_t ic_i = 0; ic_i < ic_block_size; ++ic_i) {
                   sum += V_tensor[h][w][tile_block + tile_i][ic + ic_i] * 
                          U_tensor[h][w][oc_block + oc_i][ic + ic_i];
                 }
+
                 local_sum[tile_i][oc_i] += sum;
               }
             }
