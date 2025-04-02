@@ -337,9 +337,9 @@ void output_unpacking_store(float *__restrict__ Y,
   out_tensor_t out_tensor = (out_tensor_t)out;
 
   #pragma omp parallel for schedule(static) num_threads(NUM_THREADS2) collapse(3)
-  for (int64_t h = 0; h < ti.tile_out_h; ++h) {
-    for (int64_t w = 0; w < ti.tile_out_w; ++w) {
-      for (int64_t oc = 0; oc < os.oc; ++oc) {
+  for (int oc = 0; oc < os.oc; ++oc) {
+    for (int h = 0; h < ti.tile_out_h; ++h) {
+        for (int w = 0; w < ti.tile_out_w; ++w) {
         #pragma omp simd aligned(Y_tensor, out_tensor: 64)
         for (int64_t tile = 0; tile < ti.num_tiles; ++tile) {
           tile_index_t tidx = get_tile_index(tile, ti);
@@ -354,30 +354,6 @@ void output_unpacking_store(float *__restrict__ Y,
 }
 
 
-void sgemm(const int64_t M, const int64_t N, const int64_t K, float *A, float *B, float *C) {
-  typedef float (*A_tensor_t)[K];
-  typedef float (*B_tensor_t)[K];
-  typedef float (*C_tensor_t)[M];
-  A_tensor_t A_tensor = (A_tensor_t)A;
-  B_tensor_t B_tensor = (B_tensor_t)B;
-  C_tensor_t C_tensor = (C_tensor_t)C;
-
-  #pragma omp parallel for schedule(static) num_threads(64) collapse(2)
-  for (int64_t m = 0; m < M; ++m) {
-      for (int64_t n = 0; n < N; ++n) {
-          __m512 c_val = _mm512_setzero_ps();//全部设为0
-          for (int64_t k = 0; k < K; k += 16) {
-              // 加载A和B的块
-              __m512 a_val = _mm512_load_ps(&A_tensor[m][k]);//加载16个float
-              __m512 b_val = _mm512_load_ps(&B_tensor[n][k]);//加载16个float
-              // 执行FMA操作
-              c_val = _mm512_fmadd_ps(a_val, b_val, c_val);//a*b+c
-          }
-          // 存储结果
-          _mm512_store_ps(&C_tensor[n][m], c_val);
-      }
-  }
-}
 
 
 void winograd_convolution(
@@ -390,9 +366,6 @@ void winograd_convolution(
     const int batch_num,
     float *__restrict__ out) {
   /* new vars of shape */
-  setenv("OMP_PROC_BIND","true",1);  // 启用线程绑定
-  setenv("OMP_PLACES","cores",1);    // 绑定到物理核心
-
   const image_shape_t is = {.bs = batch_num, .ic = input_channel_num, .h = image_height, .w = image_width};
   const filter_shape_t fs = {.oc = output_channel_num, .ic = input_channel_num, .h = FLT_H, .w = FLT_W};
   const out_shape_t os = get_output_shape(is, fs);
@@ -400,12 +373,12 @@ void winograd_convolution(
   const U_shape_t us = get_U_shape(fs, ti);
   const V_shape_t vs = get_V_shape(is, ti);
 
-  float *packed_filter = (float *)malloc(sizeof(float) * fs.h * fs.w * fs.oc * fs.ic);
-  float *packed_image = (float *)malloc(sizeof(float) * ti.tile_in_h * ti.tile_in_w * ti.num_tiles * is.ic);
-  float *U = (float *)malloc(sizeof(float) * ti.tile_in_h * ti.tile_in_w * us.oc * us.ic);
-  float *V = (float *)malloc(sizeof(float) * ti.tile_in_h * ti.tile_in_w * vs.num_tiles * vs.ic);
-  float *M = (float *)malloc(sizeof(float) * ti.tile_in_h * ti.tile_in_w * us.oc * vs.num_tiles);
-  float *Y = (float *)malloc(sizeof(float) * ti.tile_out_h * ti.tile_in_w * os.oc * ti.num_tiles);
+  float *packed_filter = (float *)aligned_alloc(64,sizeof(float) * fs.h * fs.w * fs.oc * fs.ic);
+  float *packed_image = (float *)aligned_alloc(64,sizeof(float) * ti.tile_in_h * ti.tile_in_w * ti.num_tiles * is.ic);
+  float *U = (float *)aligned_alloc(64,sizeof(float) * ti.tile_in_h * ti.tile_in_w * us.oc * us.ic);
+  float *V = (float *)aligned_alloc(64,sizeof(float) * ti.tile_in_h * ti.tile_in_w * vs.num_tiles * vs.ic);
+  float *M = (float *)aligned_alloc(64,sizeof(float) * ti.tile_in_h * ti.tile_in_w * us.oc * vs.num_tiles);
+  float *Y = (float *)aligned_alloc(64,sizeof(float) * ti.tile_out_h * ti.tile_in_w * os.oc * ti.num_tiles);
 
   filter_packing(filter, packed_filter, fs);
   filter_transform(packed_filter, U, fs, us, us.oc * us.ic);
@@ -414,9 +387,9 @@ void winograd_convolution(
   image_transform(packed_image, V, vs, ti, vs.ic * vs.num_tiles);
 
   // 定义分块大小
-  const int BLOCK_SIZE = 64;  // 根据实际缓存大小调整
+  const int BLOCK_SIZE = 256;  // 根据实际缓存大小调整
   
-  #pragma omp parallel for schedule(static) num_threads(NUM_THREADS1) collapse(4) 
+  #pragma omp parallel for schedule(dynamic, 4) num_threads(NUM_THREADS1) collapse(4) 
   for (int64_t h = 0; h < ti.tile_in_h; ++h) {
     for (int64_t w = 0; w < ti.tile_in_w; ++w) {
       for (int64_t tile_block = 0; tile_block < vs.num_tiles; tile_block += BLOCK_SIZE) {
@@ -434,8 +407,10 @@ void winograd_convolution(
 
           // 使用局部缓存来存储块计算结果
           float local_sum[BLOCK_SIZE][BLOCK_SIZE] = {0};
+          
 
           // 对输入通道进行分块计算
+          
           for (int64_t ic = 0; ic < us.ic; ic += BLOCK_SIZE) {
             const int ic_block_size = std::min(BLOCK_SIZE, (int)(us.ic - ic));
             
@@ -457,7 +432,9 @@ void winograd_convolution(
            // 原始写回循环被优化为先转置 local_sum 后利用 memcpy 批量拷贝
            {
             float local_sum_t[BLOCK_SIZE * BLOCK_SIZE];
+            
             // 转置 local_sum，使每个 oc_i 对应的 tile 值连续存储
+            #pragma omp simd aligned(local_sum: 64)
             for (int64_t oc_i = 0; oc_i < oc_block_size; ++oc_i) {
                 for (int64_t tile_i = 0; tile_i < tile_block_size; ++tile_i) {
                     local_sum_t[oc_i * tile_block_size + tile_i] = local_sum[tile_i][oc_i];
@@ -467,13 +444,14 @@ void winograd_convolution(
             for (int64_t oc_i = 0; oc_i < oc_block_size; ++oc_i) {
                 memcpy(&M_tensor[h][w][oc_block + oc_i][tile_block],
                        &local_sum_t[oc_i * tile_block_size],
-                       tile_block_size * sizeof(float));
-            }
-          }
+                       tile_block_size * sizeof(float));}
+           
+          
         }
       }
     }
   }
+}
 
   output_transform(M, Y, ti, us.oc * vs.num_tiles);
   output_unpacking_store(Y, out, os, ti);
