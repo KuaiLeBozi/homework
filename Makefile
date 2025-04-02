@@ -1,7 +1,13 @@
-CFLAG = -O3 -g -Wall -fopenmp
+CXX = g++
+CXXFLAGS = -O3 -mavx512f -fopenmp 
+SRCS = winograd.cc driver.cc
+OBJS = $(SRCS:.cc=.o)
+TARGET = winograd
 
-all:
-	g++ driver.cc winograd.cc -std=c++11 ${CFLAG} -o winograd
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^
 
 clean:
-	rm -f winograd
+	rm -f $(OBJS) $(TARGET)
