@@ -1,0 +1,3 @@
+/home/lcy/recruitment-2025-spring/build/CMakeFiles/winograd.dir
+/home/lcy/recruitment-2025-spring/build/CMakeFiles/edit_cache.dir
+/home/lcy/recruitment-2025-spring/build/CMakeFiles/rebuild_cache.dir

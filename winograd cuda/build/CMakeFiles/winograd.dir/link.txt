@@ -1,0 +1,1 @@
+/usr/bin/g++ CMakeFiles/winograd.dir/driver.cu.o -o winograd  -lcudadevrt -lcudart_static -lrt -lpthread -ldl  -L"/data/spack/opt/spack/linux-ubuntu22.04-icelake/gcc-11.4.0/cuda-12.8.0-vphbzjdsorewbmnlbe74g6hqtz3guuig/targets/x86_64-linux/lib/stubs" -L"/data/spack/opt/spack/linux-ubuntu22.04-icelake/gcc-11.4.0/cuda-12.8.0-vphbzjdsorewbmnlbe74g6hqtz3guuig/targets/x86_64-linux/lib"
