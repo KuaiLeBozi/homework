@@ -182,94 +182,94 @@ void filter_transform(float *__restrict__ packed_filter,
 }
 
 void output_transform(float *__restrict__ M,
-  float *__restrict__ Y,
-  const tiling_info_t ti,
-  const int64_t collapsed_dim_size) {
-typedef float(*M_tensor_t)[ti.tile_in_w][collapsed_dim_size];
-typedef float(*Y_tensor_t)[ti.tile_in_w][collapsed_dim_size];
-M_tensor_t M_tensor = (M_tensor_t)M;
-Y_tensor_t Y_tensor = (Y_tensor_t)Y;
-float z0, z1, z2, z3, z4;
+                      float *__restrict__ Y,
+                      const tiling_info_t ti,
+                      const int64_t collapsed_dim_size) {
+  typedef float(*M_tensor_t)[ti.tile_in_w][collapsed_dim_size];
+  typedef float(*Y_tensor_t)[ti.tile_in_w][collapsed_dim_size];
+  M_tensor_t M_tensor = (M_tensor_t)M;
+  Y_tensor_t Y_tensor = (Y_tensor_t)Y;
+  float z0, z1, z2, z3, z4;
 
-#pragma omp parallel for private(z0, z1, z2, z3, z4) schedule(static) num_threads(NUM_THREADS1)
-for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
-#pragma omp simd aligned(M_tensor, Y_tensor: 64)
-for (int64_t w = 0; w < ti.tile_in_w; ++w) {
-z4 = M_tensor[0][w][idx];
-z0 = z4;
-
-z4 = M_tensor[1][w][idx];
-z0 = z0 + z4;
-z1 = z4;
-z2 = z4;
-z3 = z4;
-
-z4 = M_tensor[2][w][idx];
-z0 += z4;
-z1 += -z4;
-z2 += z4;
-z3 += -z4;
-
-z4 = M_tensor[3][w][idx];
-z0 += z4;
-z1 += 2.0f * z4;
-z2 += 4.0f * z4;
-z3 += 8.0f * z4;
-
-z4 = M_tensor[4][w][idx];
-z0 += z4;
-z1 += -2.0f * z4;
-z2 += 4.0f * z4;
-z3 += -8.0f * z4;
-
-z4 = M_tensor[5][w][idx];
-z3 += z4;
-
-Y_tensor[0][w][idx] = z0;
-Y_tensor[1][w][idx] = z1;
-Y_tensor[2][w][idx] = z2;
-Y_tensor[3][w][idx] = z3;
-}
-#pragma omp simd aligned(M_tensor, Y_tensor: 64) 
-for (int64_t h = 0; h < ti.tile_out_h; ++h) {
-z4 = Y_tensor[h][0][idx];
-
-z0 = z4;
-
-z4 = Y_tensor[h][1][idx];
-z0 += z4;
-z1 = z4;
-z2 = z4;
-z3 = z4;
-
-z4 = Y_tensor[h][2][idx];
-z0 += z4;
-z1 += -z4;
-z2 += z4;
-z3 += -z4;
-
-z4 = Y_tensor[h][3][idx];
-z0 += z4;
-z1 += 2.0f * z4;
-z2 += 4.0f * z4;
-z3 += 8.0f * z4;
-
-z4 = Y_tensor[h][4][idx];
-z0 += z4;
-z1 += -2.0f * z4;
-z2 += 4.0f * z4;
-z3 += -8.0f * z4;
-
-z4 = Y_tensor[h][5][idx];
-
-z3 += z4;
-
-Y_tensor[h][0][idx] = z0;
-Y_tensor[h][1][idx] = z1;
-Y_tensor[h][2][idx] = z2;
-Y_tensor[h][3][idx] = z3;
-}
-}
+  #pragma omp parallel for private(z0, z1, z2, z3, z4) schedule(static) num_threads(NUM_THREADS1)
+  for (int64_t idx = 0; idx < collapsed_dim_size; idx++) {
+    #pragma omp simd aligned(M_tensor, Y_tensor: 64)
+    for (int64_t w = 0; w < ti.tile_in_w; ++w) {
+    z4 = M_tensor[0][w][idx];
+    z0 = z4;
+    
+    z4 = M_tensor[1][w][idx];
+    z0 = z0 + z4;
+    z1 = z4;
+    z2 = z4;
+    z3 = z4;
+    
+    z4 = M_tensor[2][w][idx];
+    z0 += z4;
+    z1 += -z4;
+    z2 += z4;
+    z3 += -z4;
+    
+    z4 = M_tensor[3][w][idx];
+    z0 += z4;
+    z1 += 2.0f * z4;
+    z2 += 4.0f * z4;
+    z3 += 8.0f * z4;
+    
+    z4 = M_tensor[4][w][idx];
+    z0 += z4;
+    z1 += -2.0f * z4;
+    z2 += 4.0f * z4;
+    z3 += -8.0f * z4;
+    
+    z4 = M_tensor[5][w][idx];
+    z3 += z4;
+    
+    Y_tensor[0][w][idx] = z0;
+    Y_tensor[1][w][idx] = z1;
+    Y_tensor[2][w][idx] = z2;
+    Y_tensor[3][w][idx] = z3;
+    }
+    #pragma omp simd aligned(M_tensor, Y_tensor: 64) 
+    for (int64_t h = 0; h < ti.tile_out_h; ++h) {
+    z4 = Y_tensor[h][0][idx];
+    
+    z0 = z4;
+    
+    z4 = Y_tensor[h][1][idx];
+    z0 += z4;
+    z1 = z4;
+    z2 = z4;
+    z3 = z4;
+    
+    z4 = Y_tensor[h][2][idx];
+    z0 += z4;
+    z1 += -z4;
+    z2 += z4;
+    z3 += -z4;
+    
+    z4 = Y_tensor[h][3][idx];
+    z0 += z4;
+    z1 += 2.0f * z4;
+    z2 += 4.0f * z4;
+    z3 += 8.0f * z4;
+    
+    z4 = Y_tensor[h][4][idx];
+    z0 += z4;
+    z1 += -2.0f * z4;
+    z2 += 4.0f * z4;
+    z3 += -8.0f * z4;
+    
+    z4 = Y_tensor[h][5][idx];
+    
+    z3 += z4;
+    
+    Y_tensor[h][0][idx] = z0;
+    Y_tensor[h][1][idx] = z1;
+    Y_tensor[h][2][idx] = z2;
+    Y_tensor[h][3][idx] = z3;
+    }
+  }
 }
 
 // 对 filter_packing 采用缓存分块优化，减小内存访存延迟
